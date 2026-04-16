@@ -1,0 +1,24 @@
+{
+    "acids_bases_and_salts": {
+      "acids": [],
+      "bases": [],
+      "indicators": ["acids", "bases"],
+      "acid_metal_reaction": ["acids"],
+      "acid_carbonate_reaction": ["acids"],
+      "acid_hydrogencarbonate_reaction": ["acids"],
+      "neutralisation": ["acids", "bases"],
+      "acid_metallic_oxide_reaction": ["acids"],
+      "basic_oxides": ["acid_metallic_oxide_reaction"],
+      "base_non_metallic_oxide_reaction": ["bases"],
+      "acidic_non_metallic_oxides": ["base_non_metallic_oxide_reaction"],
+      "hydrogen_ion_production": ["acids"],
+      "hydroxide_ion_production": ["bases"],
+      "alkalis": ["bases"],
+      "dilution": ["acids", "bases"],
+      "ph_scale": ["hydrogen_ion_production", "hydroxide_ion_production"],
+      "universal_indicator": ["ph_scale"],
+      "acid_strength": ["hydrogen_ion_production"],
+      "base_strength": ["hydroxide_ion_production"],
+      "ph_importance": ["ph_scale"]
+    }
+  }

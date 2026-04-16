@@ -1,0 +1,52 @@
+# ========================
+# ENV & SECRETS
+# ========================
+.env
+
+# ========================
+# PYTHON
+# ========================
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ========================
+# DATA (VERY IMPORTANT)
+# ========================
+data/pdfs/
+data/chunks/
+data/texts/
+
+# optional: ignore generated outputs
+data/result.txt
+
+# keep this (DO NOT ignore)
+# data/concept_graph.json  <-- useful structured data
+
+# ========================
+# LOGS / TEMP
+# ========================
+*.log
+*.tmp
+
+# ========================
+# IDE / OS
+# ========================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ========================
+# DATABASE / VECTOR STORE
+# ========================
+*.db
+*.sqlite3
+
+# ========================
+# MISC
+# ========================
+*.zip
+*.tar
