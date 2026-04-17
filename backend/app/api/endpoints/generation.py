@@ -7,6 +7,7 @@ router = APIRouter()
 generation_service = GenerationService()
 
 class GenerationRequest(BaseModel):
+    user_id: str
     topic: str
     chapter: str
     board: str
@@ -19,6 +20,7 @@ async def generate_cards(request: GenerationRequest):
     Generates new flashcards for a specific topic and chapter.
     """
     cards = await generation_service.generate_flashcards(
+        user_id=request.user_id,
         topic=request.topic,
         chapter=request.chapter,
         board=request.board,

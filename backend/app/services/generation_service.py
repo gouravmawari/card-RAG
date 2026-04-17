@@ -112,6 +112,7 @@ CARDS TO REVIEW:
 
     async def generate_flashcards(
         self,
+        user_id: str,
         topic: str,
         chapter: str,
         board: str,
@@ -119,7 +120,7 @@ CARDS TO REVIEW:
         page_range: Optional[tuple[int, int]] = None
     ) -> List[Dict]:
         """The main orchestration function."""
-        print(f"Starting generation for topic: {topic}")
+        print(f"Starting generation for topic: {topic} for user: {user_id}")
 
         # 1. Retrieve
         chunks = self.retrieval_service.get_relevant_chunks(
@@ -160,6 +161,7 @@ CARDS TO REVIEW:
             card_id = str(uuid.uuid4())
             payload = {
                 "card_id": card_id,
+                "user_id": user_id,
                 "topic": topic,
                 "chapter": chapter,
                 "board": board,
@@ -173,7 +175,7 @@ CARDS TO REVIEW:
 
             try:
                 self.supabase.table("cards").insert(payload).execute()
-                print(f"   Saved: {card['card_type']} card")
+                print(f"   Saved: {card['card_type']} card with ID: {card_id}")
                 # Add metadata to the returned object
                 card_with_id = card.copy()
                 card_with_id["id"] = card_id

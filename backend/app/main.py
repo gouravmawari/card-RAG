@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.api.endpoints import ingestion, generation, review
+from app.api.endpoints import ingestion, generation, review, auth
 
 app = FastAPI(
     title="CurMath Flashcard Engine API",
@@ -8,6 +8,7 @@ app = FastAPI(
 )
 
 # Include routers from our modules
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])
 app.include_router(ingestion.router, prefix="/api/v1/ingest", tags=["Ingestion"])
 app.include_router(generation.router, prefix="/api/v1/generate", tags=["Generation"])
 app.include_router(review.router, prefix="/api/v1/review", tags=["Review"])
