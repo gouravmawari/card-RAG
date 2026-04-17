@@ -79,6 +79,25 @@ class AuthService:
             "refresh_token": token_data.get("refresh_token"),
         }
 
+    async def sync_oauth_profile(self, user_id: str, email: str, name: str) -> Dict:
+        """
+        Ensures a public.users row exists for a Supabase Auth user.
+        Called by the frontend after Google OAuth (or any non-password sign-in)
+        to create the profile if missing. Idempotent.
+        """
+        existing = self.supabase.table("users").select("user_id, name, email").eq("user_id", user_id).limit(1).execute()
+        if existing.data:
+            return {"user_id": user_id, "created": False, **existing.data[0]}
+
+        self.supabase.table("users").insert({
+            "user_id": user_id,
+            "email": email,
+            "name": name or email.split("@")[0],
+            "total_mastery_score": 0,
+            "streak_days": 0,
+        }).execute()
+        return {"user_id": user_id, "email": email, "name": name, "created": True}
+
     async def login_user(self, email: str, password: str) -> Dict:
         token_data = _password_grant(email, password)  # raises ValueError on bad creds
 
