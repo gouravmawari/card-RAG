@@ -1,35 +1,28 @@
 import os
 import uuid
+import datetime
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 from google import genai
 from app.core.config import settings
 from app.db.supabase import get_supabase
-from app.services.retrieval_service import RetrievalService
 
-# We will import the logic from the existing scripts to avoid duplication
-# Note: In a real production environment, we would refactor these scripts
-# into a shared library, but for now, we'll adapt the logic.
 import fitz  # PyMuPDF
 import pdfplumber
 import re
-from rank_bm25 import BM25Okapi
 from qdrant_client import QdrantClient
-from qdrant_client.models import PointStruct, VectorParams, Distance
+from qdrant_client.models import PointStruct
+
 
 class IngestionService:
     def __init__(self):
         self.client_genai = genai.Client(api_key=settings.GOOGLE_API_KEY)
         self.supabase = get_supabase()
-        self.qdrant = QdrantClient(
-            url=settings.QDRANT_URL,
-            api_key=settings.QDRANT_API_KEY,
-        )
+        self.qdrant = QdrantClient(url=settings.QDRANT_URL, api_key=settings.QDRANT_API_KEY)
         self.MARGIN_PERCENT = 0.07
 
     def _extract_text_and_tables(self, pdf_path: str) -> str:
-        """Ported logic from scripts/parse_pdf.py"""
         doc = fitz.open(pdf_path)
         full_text = []
 
@@ -38,7 +31,6 @@ class IngestionService:
             content_top = page_height * self.MARGIN_PERCENT
             content_bottom = page_height * (1 - self.MARGIN_PERCENT)
 
-            # 1. Extract Tables
             table_text = ""
             try:
                 with pdfplumber.open(pdf_path) as pdf:
@@ -53,7 +45,6 @@ class IngestionService:
             except Exception as e:
                 print(f"      Warning: Table extraction failed on page {page_num}: {e}")
 
-            # 2. Extract Text
             page_dict = page.get_text("dict")
             page_content = []
             all_sizes = []
@@ -67,7 +58,8 @@ class IngestionService:
             heading_threshold = avg_size * 1.2
 
             for block in page_dict["blocks"]:
-                if block["type"] != 0: continue
+                if block["type"] != 0:
+                    continue
                 bbox = block["bbox"]
                 block_center_y = (bbox[1] + bbox[3]) / 2
                 if block_center_y < content_top or block_center_y > content_bottom:
@@ -78,10 +70,12 @@ class IngestionService:
                 for line in block["lines"]:
                     for span in line["spans"]:
                         text = span["text"].strip()
-                        if not text: continue
+                        if not text:
+                            continue
                         if span["size"] > heading_threshold:
                             is_heading = True
-                        if re.fullmatch(r"[-_=\s]+", text): continue
+                        if re.fullmatch(r"[-_=\s]+", text):
+                            continue
                         block_parts.append(text)
 
                 if block_parts:
@@ -102,44 +96,27 @@ class IngestionService:
         return "\n\n".join(full_text)
 
     def _chunk_text(self, text: str, metadata: dict) -> List[Dict]:
-        """Ported logic from scripts/chunk.py"""
-        # Simplified chunker for the service
-        # We split by [PAGE:N] and then by paragraphs
         blocks = re.split(r"\[PAGE:(\d+)\]", text)
-
         chunks = []
         chunk_id_counter = 0
+        klass = metadata.get("class", "NA")
 
-        # blocks will look like ['', '1', 'text...', '2', 'text...']
         for i in range(1, len(blocks), 2):
             page_num = int(blocks[i])
-            content = blocks[i+1].strip()
-
+            content = blocks[i + 1].strip()
             if not content:
                 continue
 
-            # Split into paragraphs
             paragraphs = content.split("\n\n")
-
-            current_chunk_words = []
+            current_chunk_words: List[str] = []
             current_chunk_page = page_num
 
             for para in paragraphs:
                 para_words = para.split()
-
-                # If adding this para exceeds ~300 words, flush the chunk
                 if len(current_chunk_words) + len(para_words) > 300 and current_chunk_words:
-                    chunk_text = " ".join(current_chunk_words)
-                    chunks.append({
-                        "chunk_id": f"{metadata['subject']}_{metadata['board']}_{metadata['class']}_chunk{chunk_id_counter:04d}",
-                        "text": chunk_text,
-                        "page_num": current_chunk_page,
-                        "topic": "General", # Default, can be improved via heading detection
-                        "chapter": metadata.get("chapter", ""),
-                        "subject": metadata["subject"],
-                        "board": metadata["board"],
-                        "class": metadata["class"]
-                    })
+                    chunks.append(self._make_chunk(
+                        chunk_id_counter, current_chunk_words, current_chunk_page, metadata, klass,
+                    ))
                     chunk_id_counter += 1
                     current_chunk_words = para_words[:]
                     current_chunk_page = page_num
@@ -147,81 +124,84 @@ class IngestionService:
                     current_chunk_words.extend(para_words)
                     current_chunk_page = page_num
 
-            # Flush final chunk of the page
             if current_chunk_words:
-                chunks.append({
-                    "chunk_id": f"{metadata['subject']}_{metadata['board']}_{metadata['class']}_chunk{chunk_id_counter:04d}",
-                    "text": " ".join(current_chunk_words),
-                    "page_num": current_chunk_page,
-                    "topic": "General",
-                    "chapter": metadata.get("chapter", ""),
-                    "subject": metadata["subject"],
-                    "board": metadata["board"],
-                    "class": metadata["class"]
-                })
+                chunks.append(self._make_chunk(
+                    chunk_id_counter, current_chunk_words, current_chunk_page, metadata, klass,
+                ))
                 chunk_id_counter += 1
 
         return chunks
 
-    async def ingest_pdf(self, pdf_path: str, metadata: Dict) -> Dict:
-        """The main orchestration function for PDF ingestion."""
-        print(f"🚀 Starting ingestion for: {pdf_path}")
-
-        # 1. Extract Text
-        print("   [1/4] Extracting text and tables...")
-        raw_text = self._extract_text_and_tables(pdf_path)
-
-        # 2. Chunk Text
-        print("   [2/4] Chunking text...")
-        chunks = self._chunk_text(raw_text, metadata)
-        print(f"      Created {len(chunks)} semantic chunks.")
-
-        # 3. Embed Chunks
-        print("   [3/4] Generating embeddings via Gemini...")
-        chunk_texts = [c["text"] for c in chunks]
-
-        # Gemini embedding call
-        result = self.client_genai.models.embed_content(
-            model="gemini-embedding-001",
-            contents=chunk_texts,
-        )
-        embeddings = [e.values for e in result.embeddings]
-
-        # 4. Store in Qdrant & Supabase
-        print("   [4/4] Storing in Qdrant and Supabase...")
-
-        # Prepare Qdrant points
-        points = []
-        for i, chunk in enumerate(chunks):
-            # Combine metadata for Qdrant payload
-            payload = {
-                **chunk,
-                "board": metadata["board"],
-                "subject": metadata["subject"],
-                "class": metadata["class"],
-            }
-
-            points.append(PointStruct(
-                id=str(uuid.uuid4()),
-                vector=embeddings[i],
-                payload=payload
-            ))
-
-        # Bulk upload to Qdrant
-        self.qdrant.upsert(
-            collection_name="ncert_chunks",
-            points=points
-        )
-
-        # Bulk upload to Supabase (using the 'cards' table as a temporary storage for chunks if needed,
-        # but ideally we should have a 'chunks' table. For now, let's just ensure we log it.)
-        # Note: We'll assume the user might want these chunks to be searchable via the RetrievalService.
-        # Since we don't have a dedicated 'chunks' table in Supabase yet, we will log success.
-        print(f"✅ Ingestion complete. {len(chunks)} chunks indexed in Qdrant.")
-
+    def _make_chunk(self, idx: int, words: List[str], page_num: int, metadata: dict, klass: str) -> Dict:
         return {
-            "status": "success",
-            "chunks_processed": len(chunks),
-            "file": os.path.basename(pdf_path)
+            "chunk_id": f"{metadata['subject']}_{metadata['board']}_{klass}_chunk{idx:04d}",
+            "text": " ".join(words),
+            "page_num": page_num,
+            "topic": self._detect_topic(words),
+            "chapter": metadata.get("chapter", ""),
+            "subject": metadata["subject"],
+            "board": metadata["board"],
+            "class": klass,
         }
 
+    def _detect_topic(self, words: List[str]) -> str:
+        """Best-effort topic from leading heading marker. Falls back to 'General'."""
+        joined = " ".join(words[:25])
+        m = re.search(r"###\s*(.+?)\s*###", joined)
+        return m.group(1).strip() if m else "General"
+
+    async def ingest_pdf(self, source_id: str, pdf_path: str, metadata: Dict) -> Dict:
+        """Background orchestration. Maintains `sources.status` throughout."""
+        try:
+            self._update_source(source_id, {"status": "processing"})
+
+            print(f"🚀 Starting ingestion for source_id={source_id}: {pdf_path}")
+
+            print("   [1/4] Extracting text and tables...")
+            raw_text = self._extract_text_and_tables(pdf_path)
+
+            print("   [2/4] Chunking text...")
+            chunks = self._chunk_text(raw_text, metadata)
+            print(f"      Created {len(chunks)} semantic chunks.")
+
+            if not chunks:
+                raise RuntimeError("No chunks produced — PDF may be empty or unreadable.")
+
+            print("   [3/4] Generating embeddings via Gemini...")
+            chunk_texts = [c["text"] for c in chunks]
+            result = self.client_genai.models.embed_content(
+                model="gemini-embedding-001",
+                contents=chunk_texts,
+            )
+            embeddings = [e.values for e in result.embeddings]
+
+            print("   [4/4] Storing in Qdrant...")
+            points = []
+            for i, chunk in enumerate(chunks):
+                payload = {**chunk, "source_id": source_id}
+                points.append(PointStruct(
+                    id=str(uuid.uuid4()),
+                    vector=embeddings[i],
+                    payload=payload,
+                ))
+            self.qdrant.upsert(collection_name="ncert_chunks", points=points)
+
+            topics = sorted({c["topic"] for c in chunks if c["topic"] and c["topic"] != "General"})
+
+            self._update_source(source_id, {
+                "status": "completed",
+                "chunk_count": len(chunks),
+                "topics": topics,
+                "processed_at": datetime.datetime.utcnow().isoformat(),
+            })
+
+            print(f"✅ Ingestion complete. {len(chunks)} chunks indexed.")
+            return {"status": "success", "chunks_processed": len(chunks), "source_id": source_id}
+
+        except Exception as e:
+            print(f"❌ Ingestion failed for {source_id}: {e}")
+            self._update_source(source_id, {"status": "failed", "error_message": str(e)[:1000]})
+            raise
+
+    def _update_source(self, source_id: str, fields: Dict) -> None:
+        self.supabase.table("sources").update(fields).eq("source_id", source_id).execute()
