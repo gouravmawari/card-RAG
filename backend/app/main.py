@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 
-from app.api.endpoints import ingestion, auth, sessions, library
+from app.api.endpoints import ingestion, auth, sessions, library, users
 from app.core.config import settings
 from app.core.rate_limit import limiter, rate_limit_exceeded_handler
 from app.core.middleware import SecurityHeadersMiddleware, PayloadSizeMiddleware
@@ -52,6 +52,7 @@ app.include_router(auth.router,      prefix="/api/v1/auth",     tags=["Auth"])
 app.include_router(ingestion.router, prefix="/api/v1/ingest",   tags=["Ingestion"])
 app.include_router(sessions.router,  prefix="/api/v1/sessions", tags=["Sessions"])
 app.include_router(library.router,   prefix="/api/v1/library",  tags=["Library"])
+app.include_router(users.router,     prefix="/api/v1/users",    tags=["Users"])
 
 
 @app.get("/")

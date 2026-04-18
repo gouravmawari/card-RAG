@@ -37,4 +37,9 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: list = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
 
+    # Admin allowlist (comma-separated emails, raw string from env).
+    # Parsed at the call site — stored as str here so pydantic-settings doesn't
+    # try to JSON-decode it when the env var is set.
+    ADMIN_EMAILS: str = os.getenv("ADMIN_EMAILS", "")
+
 settings = Settings()
