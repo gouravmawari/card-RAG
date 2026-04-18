@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     UPLOAD_DIR: Path = BASE_DIR / "data" / "uploads"
 
     # CORS
-    CORS_ORIGINS: list = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
+    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "http://localhost:3000")
 
     # Admin allowlist (comma-separated emails, raw string from env).
     # Parsed at the call site — stored as str here so pydantic-settings doesn't
