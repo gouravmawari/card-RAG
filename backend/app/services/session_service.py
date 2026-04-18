@@ -30,18 +30,30 @@ class SessionService:
         num_cards: int,
         scheduled_for: Optional[str] = None,
         focus_topics: Optional[List[str]] = None,
+        page_range: Optional[List[int]] = None,
     ) -> Dict:
         if not (1 <= num_cards <= 15):
             raise ValueError("num_cards must be between 1 and 15.")
+        if page_range is not None:
+            if len(page_range) != 2 or page_range[0] < 1 or page_range[1] < page_range[0]:
+                raise ValueError("page_range must be [from, to] with from>=1 and to>=from.")
 
-        # Source must belong to user and be completed
-        src = self.supabase.table("sources").select("source_id, status, user_id").eq("source_id", source_id).limit(1).execute()
+        # Source must be completed. Caller must own it OR it's a system library book.
+        src = self.supabase.table("sources").select("source_id, status, user_id, source_type").eq("source_id", source_id).limit(1).execute()
         if not src.data:
             raise ValueError("Source not found.")
-        if src.data[0]["user_id"] != user_id:
+        source = src.data[0]
+        if source["status"] != "completed":
+            raise ValueError(f"Source not ready (status={source['status']}).")
+        is_library = source.get("source_type") == "system_library"
+        if not is_library and source["user_id"] != user_id:
             raise ValueError("Source does not belong to this user.")
-        if src.data[0]["status"] != "completed":
-            raise ValueError(f"Source not ready (status={src.data[0]['status']}).")
+
+        creation_params: Dict = {}
+        if focus_topics:
+            creation_params["_focus_topics"] = focus_topics
+        if page_range:
+            creation_params["_page_range"] = page_range
 
         payload = {
             "user_id": user_id,
@@ -51,8 +63,8 @@ class SessionService:
             "scheduled_for": scheduled_for,
             "created_at": datetime.datetime.utcnow().isoformat(),
         }
-        if focus_topics:
-            payload["final_report_json"] = {"_focus_topics": focus_topics}
+        if creation_params:
+            payload["final_report_json"] = creation_params
 
         res = self.supabase.table("sessions").insert(payload).execute()
         return res.data[0]
@@ -68,11 +80,10 @@ class SessionService:
             self._update_session(session_id, {"status": "in_progress"})
             return {"session_id": session_id, "cards": existing.data}
 
-        # Pull focus topics (may have been saved at create time for retest)
-        focus_topics = None
+        # Pull creation params stashed at create time (focus_topics, page_range)
         frj = session.get("final_report_json") or {}
-        if isinstance(frj, dict) and "_focus_topics" in frj:
-            focus_topics = frj["_focus_topics"]
+        focus_topics = frj.get("_focus_topics") if isinstance(frj, dict) else None
+        page_range = frj.get("_page_range") if isinstance(frj, dict) else None
 
         # If no explicit focus, try weak topics for this source
         if not focus_topics:
@@ -84,6 +95,7 @@ class SessionService:
             source_id=session["source_id"],
             num_cards=session["num_cards"],
             focus_topics=focus_topics,
+            page_range=tuple(page_range) if page_range else None,
         )
 
         now = datetime.datetime.utcnow().isoformat()

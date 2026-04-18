@@ -28,6 +28,7 @@ class GenerationService:
         source_id: str,
         num_cards: int,
         focus_topics: Optional[List[str]] = None,
+        page_range: Optional[tuple] = None,
     ) -> List[Dict]:
         src = self.supabase.table("sources").select("*").eq("source_id", source_id).limit(1).execute()
         if not src.data:
@@ -55,6 +56,7 @@ class GenerationService:
             board=board,
             subject=subject,
             source_id=source_id,
+            page_range=page_range,
         )
         if not chunks:
             print("[Generation] No chunks retrieved — cannot generate cards.")

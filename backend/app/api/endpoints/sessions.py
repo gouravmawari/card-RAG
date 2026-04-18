@@ -15,6 +15,7 @@ class CreateSessionRequest(BaseModel):
     num_cards: int = Field(ge=1, le=15)
     scheduled_for: Optional[str] = Field(default=None, max_length=40)
     focus_topics: Optional[List[str]] = Field(default=None, max_length=10)
+    page_range: Optional[List[int]] = Field(default=None, min_length=2, max_length=2)
 
 
 class AnswerRequest(BaseModel):
@@ -34,6 +35,7 @@ async def create_session(request: Request, req: CreateSessionRequest, user_id: s
             num_cards=req.num_cards,
             scheduled_for=req.scheduled_for,
             focus_topics=req.focus_topics,
+            page_range=req.page_range,
         )
         return {"status": "created", "session": s}
     except ValueError as e:
