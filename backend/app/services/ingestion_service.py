@@ -1,6 +1,7 @@
 import os
 import uuid
 import datetime
+import gc
 from pathlib import Path
 from typing import List, Dict
 
@@ -145,16 +146,13 @@ class IngestionService:
         }
 
     def _detect_topic(self, words: List[str]) -> str:
-        """Best-effort topic from leading heading marker. Falls back to 'General'."""
         joined = " ".join(words[:25])
         m = re.search(r"###\s*(.+?)\s*###", joined)
         return m.group(1).strip() if m else "General"
 
     async def ingest_pdf(self, source_id: str, pdf_path: str, metadata: Dict) -> Dict:
-        """Background orchestration. Maintains `sources.status` throughout."""
         try:
             self._update_source(source_id, {"status": "processing"})
-
             print(f"🚀 Starting ingestion for source_id={source_id}: {pdf_path}")
 
             print("   [1/4] Extracting text and tables...")
@@ -164,16 +162,30 @@ class IngestionService:
             chunks = self._chunk_text(raw_text, metadata)
             print(f"      Created {len(chunks)} semantic chunks.")
 
+            # Free raw text immediately after chunking
+            del raw_text
+            gc.collect()
+
             if not chunks:
                 raise RuntimeError("No chunks produced — PDF may be empty or unreadable.")
 
             print("   [3/4] Generating embeddings via Gemini...")
             chunk_texts = [c["text"] for c in chunks]
-            result = self.client_genai.models.embed_content(
-                model="gemini-embedding-001",
-                contents=chunk_texts,
-            )
-            embeddings = [e.values for e in result.embeddings]
+            embeddings = []
+            BATCH_SIZE = 10
+
+            for i in range(0, len(chunk_texts), BATCH_SIZE):
+                batch = chunk_texts[i:i + BATCH_SIZE]
+                result = self.client_genai.models.embed_content(
+                    model="gemini-embedding-001",
+                    contents=batch,
+                )
+                embeddings.extend([e.values for e in result.embeddings])
+                del result
+                gc.collect()
+
+            del chunk_texts
+            gc.collect()
 
             print("   [4/4] Storing in Qdrant...")
             points = []
@@ -184,7 +196,14 @@ class IngestionService:
                     vector=embeddings[i],
                     payload=payload,
                 ))
-            self.qdrant.upsert(collection_name="ncert_chunks", points=points)
+
+            # Upsert in batches to avoid large payloads
+            QDRANT_BATCH = 50
+            for i in range(0, len(points), QDRANT_BATCH):
+                self.qdrant.upsert(collection_name="ncert_chunks", points=points[i:i + QDRANT_BATCH])
+
+            del embeddings, points
+            gc.collect()
 
             topics = sorted({c["topic"] for c in chunks if c["topic"] and c["topic"] != "General"})
 
